@@ -1,0 +1,722 @@
+/**
+ * HỆ THỐNG NỘP BÀI – NỘP DỰ ÁN – CHẤM THEO RUBRIC
+ * Chuyên đề 2. Kiểm soát sinh học – Lớp 12CS1
+ * Tổ Sinh học – Trường THPT Chuyên Lê Hồng Phong. Giáo viên: Hồ Tấn Minh.
+ *
+ *  - Phát học liệu số cho học sinh qua một đường link (doGet); thêm ?gv=1 để mở khu vực giáo viên chấm.
+ *  - Nhận bài làm phiếu học tập (nopBai).
+ *  - Nhận hồ sơ dự án + bản tự chấm theo rubric (nopDuAn), phiếu đánh giá đồng đẳng (nopDongDang),
+ *    phiếu chấm chéo giữa các nhóm (chamCheo).
+ *  - Giáo viên chấm theo rubric (gvDanhSach, gvCham); hệ thống tự tổng hợp "Bảng điểm dự án".
+ * Cài đặt: xem tệp HuongDan_NopBai_GoogleDrive_CD2.docx.
+ */
+
+const CAU_HINH = {
+  LOP: '12CS1',
+  TEN_THU_MUC: 'CD2 Kiểm soát sinh học – Bài nộp 12CS1',
+  TEN_BANG: 'Tổng hợp bài nộp CD2 – 12CS1',
+  TEN_TEP_HOC_LIEU: 'HocLieuSo_CD2_KiemSoatSinhHoc_offline.html',
+  MA_NOP: '',            // Để trống: không cần mã. Ví dụ 'KSSH26': học sinh phải nhập đúng mã mới nộp được.
+  MA_GV: '',             // BẮT BUỘC đặt trước khi chấm, ít nhất 6 kí tự, chỉ giáo viên biết. Ví dụ 'Minh#2026'.
+  MO_NHAN_BAI: true,     // false: khoá nhận bài làm phiếu học tập.
+  MO_NHAN_DU_AN: true,   // false: khoá nhận hồ sơ dự án, đồng đẳng, chấm chéo.
+  HAN_NOP_DU_AN: '2027-01-30T07:00:00+07:00',   // mốc M4; nộp sau hạn bị trừ 1 điểm/ngày, tối đa 3 điểm
+  TRONG_SO: { gv: 0.7, cheo: 0.2, tu: 0.1 },    // điểm nhóm = GV 70% + chấm chéo 20% + tự chấm 10%
+  TAO_GOOGLE_DOC: true,  // false: lưu bài làm phiếu học tập dạng .txt
+  TEP_TOI_DA_MB: 10,     // tổng dung lượng tệp đính kèm mỗi lần nộp dự án
+  HIEN_DONG_DANG: true   // khi xem điểm: học sinh thấy điểm đồng đẳng TRUNG BÌNH của chính mình và hệ số (không thấy ai chấm bao nhiêu)
+};
+
+/* Rubric – khớp Phiếu giao nhiệm vụ dự án (thang 10; mức 4/3/2/1 = 100/75/50/25%) */
+const RUBRIC_W = [4, 2, 2, 2];
+const PCT = { 1: 0.25, 2: 0.5, 3: 0.75, 4: 1 };
+const DUOI_TEP = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'csv', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'mp3', 'm4a', 'mp4', 'mov', 'zip'];
+
+const SH = {
+  NOP: ['Bài nộp', ['Thời gian nhận', 'Họ và tên', 'STT', 'Nhóm', 'Lần nộp', 'Số phiếu đã làm', 'Các phiếu', 'Tự kiểm tra (đúng/làm)',
+    'Số dòng nhật ký AI', 'Tệp bài làm', 'Giờ gửi trên máy HS', 'Điểm / nhận xét của GV']],
+  CT: ['Chi tiết', ['Thời gian nhận', 'Họ và tên', 'STT', 'Nhóm', 'Lần nộp', 'Phiếu', 'Nhiệm vụ', 'Trả lời']],
+  HS: ['DA Hồ sơ', ['Thời gian nhận', 'Nhóm', 'Mã DA', 'Tên dự án', 'Lần nộp', 'Thành viên (họ tên – STT – vai)', 'Tên sản phẩm',
+    'Liên kết sản phẩm', 'Tệp đính kèm', 'Số dòng nhật ký AI', 'Tự chấm TC1', 'TC2', 'TC3', 'TC4', 'Điểm tự chấm', 'Số ngày trễ',
+    'Hồ sơ (Google Docs)', 'Dữ liệu (JSON)']],
+  DD: ['DA Đồng đẳng', ['Thời gian nhận', 'Người chấm', 'Nhóm', 'Người được chấm', 'Đúng hạn (0–2)', 'Chất lượng (0–2)', 'Hợp tác (0–2)', 'Tổng (0–6)']],
+  CC: ['DA Chấm chéo', ['Thời gian nhận', 'Người chấm', 'Nhóm người chấm', 'Nhóm được chấm', 'TC1', 'TC2', 'TC3', 'TC4', 'Điểm', 'Góp ý / câu hỏi phản biện']],
+  GV: ['DA GV chấm', ['Thời gian', 'Nhóm', 'TC1', 'TC2', 'TC3', 'TC4', 'Sao chép không dẫn nguồn', 'Thiếu nhật ký AI',
+    'Đưa dữ liệu cá nhân vào AI', 'Số ngày trễ', 'Điểm GV (chưa trừ trễ)', 'Nhận xét']],
+  BD: ['Bảng điểm dự án', []],
+  LP: ['DA Loại phiếu', ['Thời gian', 'Loại phiếu', 'Nhóm', 'Người chấm', 'Trạng thái', 'Lí do']],
+  XD: ['Điểm học sinh', ['STT', 'Họ và tên', 'Nhóm', 'Mã tra cứu', 'Điểm phiếu học tập', 'Điểm kiểm tra 45 phút', 'Nhận xét chung của GV']]
+};
+
+/* ================== CÀI ĐẶT (chạy 1 lần) ================== */
+function caiDat() {
+  const thuMuc = layThuMuc_();
+  const bang = layBang_();
+  const props = PropertiesService.getScriptProperties();
+  const ds = DriveApp.getFilesByName(CAU_HINH.TEN_TEP_HOC_LIEU);
+  if (ds.hasNext()) {
+    props.setProperty('HTML_ID', ds.next().getId());
+    Logger.log('Đã tìm thấy tệp học liệu: ' + CAU_HINH.TEN_TEP_HOC_LIEU);
+  } else {
+    Logger.log('CHƯA thấy tệp ' + CAU_HINH.TEN_TEP_HOC_LIEU + ' trên Google Drive. Hãy tải tệp lên rồi chạy lại caiDat().');
+  }
+  if (!CAU_HINH.MA_GV || CAU_HINH.MA_GV.length < 6) Logger.log('LƯU Ý: chưa đặt MA_GV (≥ 6 kí tự) nên chưa dùng được khu vực giáo viên chấm.');
+  Logger.log('Thư mục bài nộp: ' + thuMuc.getUrl());
+  Logger.log('Bảng tổng hợp: ' + bang.getUrl());
+}
+
+/* ================== PHÁT HỌC LIỆU ================== */
+function doGet(e) {
+  const q = (e && e.parameter) || {};
+  if (q.kiemtra) return json_({ ok: true, lop: CAU_HINH.LOP, moNhanBai: CAU_HINH.MO_NHAN_BAI, moNhanDuAn: CAU_HINH.MO_NHAN_DU_AN });
+  const id = PropertiesService.getScriptProperties().getProperty('HTML_ID');
+  let html = '';
+  try {
+    html = DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8');
+  } catch (err) {
+    return HtmlService.createHtmlOutput('<p style="font:16px sans-serif;padding:24px">Chưa tìm thấy học liệu. '
+      + 'Giáo viên hãy tải tệp ' + CAU_HINH.TEN_TEP_HOC_LIEU + ' lên Google Drive rồi chạy hàm caiDat().</p>');
+  }
+  if (q.gv) html = html.replace("'__CHE_DO__'", "'gv'");
+  return HtmlService.createHtmlOutput(html)
+    .setTitle('Kiểm soát sinh học – ' + CAU_HINH.LOP)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/* ================== CỔNG NHẬN DỮ LIỆU ================== */
+// Trang học liệu gọi trực tiếp các hàm dưới đây bằng google.script.run.
+function nopBai(p) { return luuBai_(p); }
+function nopDuAn(p) { return anToan_(function () { return luuDuAn_(p); }); }
+function nopDongDang(p) { return anToan_(function () { return luuDongDang_(p); }); }
+function chamCheo(p) { return anToan_(function () { return luuChamCheo_(p); }); }
+function gvDanhSach(p) { return anToan_(function () { return gvDanhSach_(p); }); }
+function gvCham(p) { return anToan_(function () { return gvCham_(p); }); }
+function gvLoaiPhieu(p) { return anToan_(function () { return gvLoaiPhieu_(p); }); }
+function hsXemDiem(p) { return xemDiem_(p); }
+function capNhatBangDiem() { ghiBangDiem_(tongHop_()); }   // giáo viên có thể chạy tay trong trình soạn thảo
+
+// Bản HTML mở ngoài gửi bằng fetch: {hanhDong: 'nopDuAn', duLieu: {...}} hoặc gói bài làm phiếu học tập.
+function doPost(e) {
+  let p;
+  try { p = JSON.parse(e.postData.contents); }
+  catch (err) { return json_({ ok: false, loi: 'Dữ liệu gửi lên không hợp lệ.' }); }
+  const bang = { nopDuAn: nopDuAn, nopDongDang: nopDongDang, chamCheo: chamCheo, gvDanhSach: gvDanhSach, gvCham: gvCham, gvLoaiPhieu: gvLoaiPhieu, hsXemDiem: hsXemDiem };
+  if (p && p.hanhDong && bang[p.hanhDong]) return json_(bang[p.hanhDong](p.duLieu));
+  return json_(luuBai_(p));
+}
+
+function anToan_(fn) {
+  const khoa = LockService.getScriptLock();
+  if (!khoa.tryLock(25000)) return { ok: false, loi: 'Hệ thống đang bận, em thử lại sau ít giây.' };
+  try { return fn(); }
+  catch (err) { return { ok: false, loi: 'Lỗi xử lí (' + err.message + ').' }; }
+  finally { khoa.releaseLock(); }
+}
+
+/* ================== BÀI LÀM PHIẾU HỌC TẬP ================== */
+function luuBai_(p) {
+  if (!CAU_HINH.MO_NHAN_BAI) return { ok: false, loi: 'Đã hết hạn nộp bài.' };
+  if (!p || typeof p !== 'object') return { ok: false, loi: 'Không có dữ liệu bài làm.' };
+  const hoTen = sach_(p.hoten, 80), stt = sach_(p.stt, 4), nhom = sach_(p.nhom, 10);
+  if (hoTen.length < 3) return { ok: false, loi: 'Thiếu họ và tên.' };
+  if (!nhom) return { ok: false, loi: 'Thiếu số nhóm.' };
+  if (!dungMaNop_(p.ma)) return { ok: false, loi: 'Mã nộp bài chưa đúng.' };
+  if (JSON.stringify(p).length > 300000) return { ok: false, loi: 'Bài làm quá dài.' };
+
+  const phieu = (Array.isArray(p.phieu) ? p.phieu : []).slice(0, 20).map(function (ph) {
+    return {
+      so: sach_(ph && ph.so, 4), ten: sach_(ph && ph.ten, 200),
+      cau: (Array.isArray(ph && ph.cau) ? ph.cau : []).slice(0, 20).map(function (c) {
+        return { nv: sach_(c && c.nv, 800), tl: sach_(c && c.tl, 8000) };
+      })
+    };
+  });
+  const tn = p.tracnghiem || {};
+  const tong = Number(tn.tong) || 0, dung = Number(tn.dung) || 0;
+  const nhatKy = (Array.isArray(p.nhatky) ? p.nhatky : []).slice(0, 50).map(function (r) {
+    return (Array.isArray(r) ? r : []).slice(0, 4).map(function (v) { return sach_(v, 1000); });
+  });
+
+  const khoa = LockService.getScriptLock();
+  if (!khoa.tryLock(20000)) return { ok: false, loi: 'Hệ thống đang bận, em thử lại sau ít giây.' };
+  try {
+    const bang = layBang_();
+    const shNop = bang.getSheetByName(SH.NOP[0]);
+    const shCT = bang.getSheetByName(SH.CT[0]);
+    const now = new Date();
+    const khoaHS = chuanHoa_(hoTen) + '|' + chuanHoa_(nhom);
+    let lan = 1;
+    const n = shNop.getLastRow() - 1;
+    if (n > 0) {
+      shNop.getRange(2, 2, n, 3).getValues().forEach(function (r) {
+        if (chuanHoa_(r[0]) + '|' + chuanHoa_(r[2]) === khoaHS) lan++;
+      });
+    }
+    const tep = taoTepBaiLam_({ hoTen: hoTen, stt: stt, nhom: nhom, lan: lan, phieu: phieu, tong: tong, dung: dung,
+      chon: tn.chon || {}, nhatKy: nhatKy, vanBan: sach_(p.vanban, 200000) }, now);
+    shNop.appendRow([now, o_(hoTen), o_(stt), o_(nhom), lan, phieu.length,
+      phieu.map(function (x) { return x.so; }).join(', '),
+      tong ? (dung + '/' + tong) : '', nhatKy.length, tep.getUrl(), o_(sach_(p.gui_luc, 40)), '']);
+    const dong = [];
+    phieu.forEach(function (ph) {
+      ph.cau.forEach(function (c) { dong.push([now, o_(hoTen), o_(stt), o_(nhom), lan, 'PHT ' + ph.so, o_(c.nv), o_(c.tl)]); });
+    });
+    if (dong.length) shCT.getRange(shCT.getLastRow() + 1, 1, dong.length, SH.CT[1].length).setValues(dong);
+    return { ok: true, lan: lan, soPhieu: phieu.length };
+  } catch (err) {
+    return { ok: false, loi: 'Lỗi lưu bài (' + err.message + ').' };
+  } finally {
+    khoa.releaseLock();
+  }
+}
+
+function taoTepBaiLam_(b, now) {
+  const tz = Session.getScriptTimeZone() || 'Asia/Ho_Chi_Minh';
+  const thuMucNhom = layThuMucCon_(layThuMuc_(), 'Nhóm ' + b.nhom);
+  const ten = [CAU_HINH.LOP, 'N' + b.nhom, b.stt ? ('STT' + b.stt) : '', khongDau_(b.hoTen).replace(/\s+/g, ''),
+    'lan' + b.lan, Utilities.formatDate(now, tz, 'yyyyMMdd-HHmm')].filter(String).join('_');
+  const tieuDe = 'BÀI LÀM CHUYÊN ĐỀ 2 – KIỂM SOÁT SINH HỌC · LỚP ' + CAU_HINH.LOP;
+  const thongTin = 'Họ và tên: ' + b.hoTen + ' · STT: ' + (b.stt || '…') + ' · Nhóm: ' + b.nhom
+    + ' · Lần nộp: ' + b.lan + ' · Nhận lúc: ' + Utilities.formatDate(now, tz, 'HH:mm dd/MM/yyyy');
+  if (CAU_HINH.TAO_GOOGLE_DOC) {
+    try {
+      const doc = DocumentApp.create(ten);
+      const body = doc.getBody();
+      body.appendParagraph(tieuDe).setHeading(DocumentApp.ParagraphHeading.TITLE);
+      body.appendParagraph(thongTin);
+      b.phieu.forEach(function (ph) {
+        body.appendParagraph('Phiếu học tập số ' + ph.so + ' – ' + ph.ten).setHeading(DocumentApp.ParagraphHeading.HEADING2);
+        ph.cau.forEach(function (c) {
+          body.appendParagraph(c.nv).setBold(true);
+          body.appendParagraph(c.tl).setBold(false);
+        });
+      });
+      if (b.tong) {
+        body.appendParagraph('Tự kiểm tra: ' + b.dung + '/' + b.tong + ' câu đúng').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+        body.appendParagraph(Object.keys(b.chon).map(function (k) { return 'Câu ' + (Number(k) + 1) + ': ' + sach_(b.chon[k], 2); }).join(' · '));
+      }
+      if (b.nhatKy.length) {
+        body.appendParagraph('Nhật ký kiểm chứng AI').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+        body.appendTable([['Nội dung do AI tạo', 'Công cụ – ngày', 'Nguồn đối chiếu', 'Đúng / Sai / Đã sửa']].concat(b.nhatKy.map(du4_)));
+      }
+      body.appendParagraph('Nhận xét của giáo viên:').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+      body.appendParagraph('');
+      doc.saveAndClose();
+      const tep = DriveApp.getFileById(doc.getId());
+      tep.moveTo(thuMucNhom);
+      return tep;
+    } catch (err) { /* hết hạn mức tạo Docs → lưu .txt */ }
+  }
+  return thuMucNhom.createFile(ten + '.txt', tieuDe + '\n' + thongTin + '\n\n' + b.vanBan, MimeType.PLAIN_TEXT);
+}
+
+/* ================== HỒ SƠ DỰ ÁN + TỰ CHẤM ================== */
+function luuDuAn_(p) {
+  if (!CAU_HINH.MO_NHAN_DU_AN) return { ok: false, loi: 'Đã khoá nhận hồ sơ dự án.' };
+  if (!p || typeof p !== 'object') return { ok: false, loi: 'Không có dữ liệu.' };
+  if (!dungMaNop_(p.ma)) return { ok: false, loi: 'Mã nộp bài chưa đúng.' };
+  const nhom = sach_(p.nhom, 10), maDa = sach_(p.maDa, 6), tenDa = sach_(p.tenDa, 200);
+  if (!nhom) return { ok: false, loi: 'Thiếu số nhóm.' };
+  if (!/^DA(10|[1-9])$/.test(maDa)) return { ok: false, loi: 'Chưa chọn dự án.' };
+  const tv = (Array.isArray(p.thanhVien) ? p.thanhVien : []).slice(0, 6).map(function (x) {
+    return { ten: sach_(x && x.ten, 80), stt: sach_(x && x.stt, 4), vai: sach_(x && x.vai, 80) };
+  }).filter(function (x) { return x.ten.length >= 3; });
+  if (tv.length < 2) return { ok: false, loi: 'Cần ghi đủ họ tên các thành viên.' };
+  const muc = docMuc_(p.muc);
+  if (!muc) return { ok: false, loi: 'Chưa tự chấm đủ 4 tiêu chí.' };
+  const lienKet = (Array.isArray(p.lienKet) ? p.lienKet : []).slice(0, 6).map(function (x) {
+    return { mo: sach_(x && x.mo, 120), url: sach_(x && x.url, 500) };
+  }).filter(function (x) { return /^https?:\/\//i.test(x.url); });
+  const tep = Array.isArray(p.tep) ? p.tep.slice(0, 5) : [];
+  let tongByte = 0;
+  for (let i = 0; i < tep.length; i++) {
+    const duoi = String(tep[i].ten || '').split('.').pop().toLowerCase();
+    if (DUOI_TEP.indexOf(duoi) < 0) return { ok: false, loi: 'Không nhận loại tệp .' + duoi + '.' };
+    tongByte += Math.floor(String(tep[i].b64 || '').length * 3 / 4);
+  }
+  if (tongByte > CAU_HINH.TEP_TOI_DA_MB * 1024 * 1024) return { ok: false, loi: 'Tệp đính kèm vượt ' + CAU_HINH.TEP_TOI_DA_MB + ' MB; hãy tải lên Drive/YouTube và dán liên kết.' };
+  if (!lienKet.length && !tep.length) return { ok: false, loi: 'Cần ít nhất 1 liên kết hoặc 1 tệp sản phẩm.' };
+
+  const tom = {};
+  ['cauHoi', 'phuongPhap', 'ketQua', 'ketLuan', 'ai'].forEach(function (k) { tom[k] = sach_(p.tom && p.tom[k], 3000); });
+  const minhChung = [0, 1, 2, 3].map(function (i) { return sach_(p.minhChung && p.minhChung[i], 1500); });
+  const camKet = [0, 1, 2, 3].map(function (i) { return !!(p.camKet && p.camKet[i]); });
+  const soNK = Math.max(0, Math.min(200, Number(p.soNhatKy) || 0));
+  const phanTu = sach_(p.phanTu, 2000);
+  const sanPham = sach_(p.sanPham, 200);
+
+  const now = new Date();
+  const bang = layBang_();
+  const sh = bang.getSheetByName(SH.HS[0]);
+  let lan = 1;
+  const n = sh.getLastRow() - 1;
+  if (n > 0) sh.getRange(2, 2, n, 1).getValues().forEach(function (r) { if (chuanHoa_(r[0]) === chuanHoa_(nhom)) lan++; });
+
+  const thuMuc = layThuMucCon_(layThuMucCon_(layThuMuc_(), 'Dự án'), 'Nhóm ' + nhom + ' – ' + maDa);
+  const tepDaLuu = tep.map(function (t) {
+    const blob = Utilities.newBlob(Utilities.base64Decode(String(t.b64 || '')), sach_(t.loai, 100) || 'application/octet-stream',
+      'lan' + lan + '_' + sach_(t.ten, 120));
+    const f = thuMuc.createFile(blob);
+    return { ten: f.getName(), url: f.getUrl() };
+  });
+
+  const tuDong = coTuDong_(soNK);
+  const kq = tinhDiem_(muc, tuDong);
+  const tre = soNgayTre_(now);
+  const hoSo = { nhom: nhom, maDa: maDa, tenDa: tenDa, lan: lan, thanhVien: tv, sanPham: sanPham, lienKet: lienKet, tep: tepDaLuu,
+    tom: tom, muc: muc, minhChung: minhChung, camKet: camKet, soNhatKy: soNK, phanTu: phanTu };
+  const doc = taoHoSoDuAn_(hoSo, kq, tre, thuMuc, now);
+  hoSo.docUrl = doc.getUrl();
+
+  sh.appendRow([now, o_(nhom), maDa, o_(tenDa), lan,
+    tv.map(function (x) { return x.ten + ' – ' + (x.stt || '…') + ' – ' + (x.vai || '…'); }).join('\n'),
+    o_(sanPham), lienKet.map(function (x) { return x.url; }).join('\n'), tepDaLuu.map(function (x) { return x.url; }).join('\n'),
+    soNK, muc[0], muc[1], muc[2], muc[3], kq.diem, tre, doc.getUrl(), gonJson_(hoSo)]);
+
+  return { ok: true, lan: lan, diemTu: kq.diem, mucTinh: kq.muc, ghiChu: kq.ghiChu, soNgayTre: tre, han: CAU_HINH.HAN_NOP_DU_AN };
+}
+
+function taoHoSoDuAn_(h, kq, tre, thuMuc, now) {
+  const tz = Session.getScriptTimeZone() || 'Asia/Ho_Chi_Minh';
+  const ten = CAU_HINH.LOP + '_Nhom' + h.nhom + '_' + h.maDa + '_HoSoDuAn_lan' + h.lan + '_' + Utilities.formatDate(now, tz, 'yyyyMMdd-HHmm');
+  const doc = DocumentApp.create(ten);
+  const b = doc.getBody();
+  b.appendParagraph('HỒ SƠ DỰ ÁN – ' + h.maDa + '. ' + h.tenDa).setHeading(DocumentApp.ParagraphHeading.TITLE);
+  b.appendParagraph('Lớp ' + CAU_HINH.LOP + ' · Nhóm ' + h.nhom + ' · Lần nộp ' + h.lan + ' · Nhận lúc '
+    + Utilities.formatDate(now, tz, 'HH:mm dd/MM/yyyy') + (tre ? ' · Trễ ' + tre + ' ngày' : ''));
+  b.appendParagraph('Thành viên').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  b.appendTable([['Họ và tên', 'STT', 'Vai trò']].concat(h.thanhVien.map(function (x) { return [x.ten, x.stt || '', x.vai || '']; })));
+  b.appendParagraph('Sản phẩm: ' + (h.sanPham || '…')).setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  h.lienKet.forEach(function (x) { b.appendListItem((x.mo || 'Liên kết') + ': ' + x.url); });
+  h.tep.forEach(function (x) { b.appendListItem('Tệp: ' + x.ten + ' – ' + x.url); });
+  const muc = [['cauHoi', 'Câu hỏi nghiên cứu'], ['phuongPhap', 'Phương pháp và dữ liệu'], ['ketQua', 'Kết quả chính'],
+    ['ketLuan', 'Kết luận và đề xuất'], ['ai', 'Sử dụng trí tuệ nhân tạo (công cụ, mục đích, cách kiểm chứng)']];
+  muc.forEach(function (m) {
+    b.appendParagraph(m[1]).setHeading(DocumentApp.ParagraphHeading.HEADING2);
+    b.appendParagraph(h.tom[m[0]] || '…');
+  });
+  b.appendParagraph('Nhóm tự chấm theo rubric: ' + dinhDang_(kq.diem) + '/10').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  b.appendTable([['Tiêu chí', 'Mức chọn', 'Mức tính điểm', 'Minh chứng']].concat([0, 1, 2, 3].map(function (i) {
+    return ['TC' + (i + 1) + ' (' + RUBRIC_W[i] + ' điểm)', 'Mức ' + h.muc[i], kq.muc[i] ? ('Mức ' + kq.muc[i]) : 'Không xét', h.minhChung[i] || '…'];
+  })));
+  if (kq.ghiChu.length) b.appendParagraph('Ghi chú: ' + kq.ghiChu.join(' '));
+  b.appendParagraph('Nhật ký kiểm chứng AI: ' + h.soNhatKy + ' dòng.');
+  b.appendParagraph('Phản tư của nhóm').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  b.appendParagraph(h.phanTu || '…');
+  b.appendParagraph('Cam kết: ' + ['dẫn nguồn đầy đủ', 'gắn nhãn “Do AI tạo”', 'không đưa thông tin cá nhân vào AI', 'cả nhóm đồng ý nội dung']
+    .map(function (t, i) { return (h.camKet[i] ? '☑ ' : '☐ ') + t; }).join('; ') + '.');
+  b.appendParagraph('Nhận xét của giáo viên').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  b.appendParagraph('');
+  doc.saveAndClose();
+  const f = DriveApp.getFileById(doc.getId());
+  f.moveTo(thuMuc);
+  return f;
+}
+
+/* ================== ĐỒNG ĐẲNG & CHẤM CHÉO ================== */
+function luuDongDang_(p) {
+  if (!CAU_HINH.MO_NHAN_DU_AN) return { ok: false, loi: 'Đã khoá nhận phiếu đánh giá.' };
+  if (!p || typeof p !== 'object') return { ok: false, loi: 'Không có dữ liệu.' };
+  if (!dungMaNop_(p.ma)) return { ok: false, loi: 'Mã nộp bài chưa đúng.' };
+  const nguoi = sach_(p.nguoiCham, 80), nhom = sach_(p.nhom, 10);
+  if (nguoi.length < 3 || !nhom) return { ok: false, loi: 'Thiếu họ tên hoặc nhóm của em.' };
+  const dong = (Array.isArray(p.dong) ? p.dong : []).slice(0, 6).map(function (r) {
+    const d = [0, 1, 2].map(function (i) { const v = Number(r && r.d && r.d[i]); return (v === 0 || v === 1 || v === 2) ? v : null; });
+    return { ten: sach_(r && r.ten, 80), d: d };
+  }).filter(function (r) { return r.ten.length >= 3 && r.d.every(function (v) { return v !== null; }) && chuanHoa_(r.ten) !== chuanHoa_(nguoi); });
+  if (!dong.length) return { ok: false, loi: 'Chưa chấm đủ 3 tiêu chí cho bạn nào.' };
+  const now = new Date();
+  const sh = layBang_().getSheetByName(SH.DD[0]);
+  sh.getRange(sh.getLastRow() + 1, 1, dong.length, SH.DD[1].length).setValues(dong.map(function (r) {
+    return [now, o_(nguoi), o_(nhom), o_(r.ten), r.d[0], r.d[1], r.d[2], r.d[0] + r.d[1] + r.d[2]];
+  }));
+  return { ok: true, soBan: dong.length };
+}
+
+function luuChamCheo_(p) {
+  if (!CAU_HINH.MO_NHAN_DU_AN) return { ok: false, loi: 'Đã khoá nhận phiếu chấm.' };
+  if (!p || typeof p !== 'object') return { ok: false, loi: 'Không có dữ liệu.' };
+  if (!dungMaNop_(p.ma)) return { ok: false, loi: 'Mã nộp bài chưa đúng.' };
+  const nguoi = sach_(p.nguoiCham, 80), nhom = sach_(p.nhom, 10), dich = sach_(p.nhomDuocCham, 10);
+  if (nguoi.length < 3 || !nhom || !dich) return { ok: false, loi: 'Thiếu họ tên, nhóm của em hoặc nhóm được chấm.' };
+  if (chuanHoa_(nhom) === chuanHoa_(dich)) return { ok: false, loi: 'Không tự chấm chéo nhóm mình.' };
+  const muc = docMuc_(p.muc);
+  if (!muc) return { ok: false, loi: 'Chưa chấm đủ 4 tiêu chí.' };
+  const kq = tinhDiem_(muc, {});
+  const sh = layBang_().getSheetByName(SH.CC[0]);
+  sh.appendRow([new Date(), o_(nguoi), o_(nhom), o_(dich), muc[0], muc[1], muc[2], muc[3], kq.diem, o_(sach_(p.gopY, 1500))]);
+  return { ok: true, diem: kq.diem };
+}
+
+/* ================== GIÁO VIÊN ================== */
+function kiemTraGV_(ma) {
+  if (!CAU_HINH.MA_GV || CAU_HINH.MA_GV.length < 6) return 'Chưa đặt MA_GV trong Code.gs.';
+  const cache = CacheService.getScriptCache();
+  const sai = Number(cache.get('saiMaGV') || 0);
+  if (sai >= 8) return 'Nhập sai mã quá nhiều lần, thử lại sau 10 phút.';
+  if (String(ma || '') !== CAU_HINH.MA_GV) { cache.put('saiMaGV', String(sai + 1), 600); return 'Mã giáo viên không đúng.'; }
+  return '';
+}
+
+function gvDanhSach_(p) {
+  const loi = kiemTraGV_(p && p.ma);
+  if (loi) return { ok: false, loi: loi };
+  const th = tongHop_();
+  ghiBangDiem_(th);
+  return { ok: true, nhom: th, bangUrl: layBang_().getUrl(), trongSo: CAU_HINH.TRONG_SO, han: CAU_HINH.HAN_NOP_DU_AN };
+}
+
+function gvCham_(p) {
+  const loi = kiemTraGV_(p && p.ma);
+  if (loi) return { ok: false, loi: loi };
+  const nhom = sach_(p.nhom, 10);
+  const muc = docMuc_(p.muc);
+  if (!nhom || !muc) return { ok: false, loi: 'Chưa chọn đủ mức cho 4 tiêu chí.' };
+  const vp = { saoChep: !!(p.vp && p.vp.saoChep), thieuNhatKy: !!(p.vp && p.vp.thieuNhatKy), duLieuCaNhan: !!(p.vp && p.vp.duLieuCaNhan) };
+  const tre = Math.max(0, Math.min(30, Math.round(Number(p.tre) || 0)));
+  const kq = tinhDiem_(muc, vp);
+  layBang_().getSheetByName(SH.GV[0]).appendRow([new Date(), o_(nhom), muc[0], muc[1], muc[2], muc[3],
+    vp.saoChep ? 'x' : '', vp.thieuNhatKy ? 'x' : '', vp.duLieuCaNhan ? 'x' : '', tre, kq.diem, o_(sach_(p.nhanXet, 3000))]);
+  const th = tongHop_();
+  ghiBangDiem_(th);
+  return { ok: true, nhom: th, bangUrl: layBang_().getUrl(), trongSo: CAU_HINH.TRONG_SO, han: CAU_HINH.HAN_NOP_DU_AN };
+}
+
+// Giáo viên loại (hoặc khôi phục) một phiếu chấm chéo / một người chấm đồng đẳng bất thường.
+// p: {ma, loai: 'CC'|'DD', nhom, nguoi, loaiBo: true|false, liDo}
+//   CC: nhom = nhóm ĐƯỢC chấm, nguoi = người chấm chéo;  DD: nhom = nhóm, nguoi = người chấm đồng đẳng.
+function gvLoaiPhieu_(p) {
+  const loi = kiemTraGV_(p && p.ma);
+  if (loi) return { ok: false, loi: loi };
+  const loai = p.loai === 'DD' ? 'DD' : 'CC';
+  const nhom = sach_(p.nhom, 10), nguoi = sach_(p.nguoi, 80);
+  if (!nhom || !nguoi) return { ok: false, loi: 'Thiếu nhóm hoặc người chấm.' };
+  layBang_().getSheetByName(SH.LP[0]).appendRow([new Date(), loai, o_(nhom), o_(nguoi), p.loaiBo ? 'Loại' : 'Tính', o_(sach_(p.liDo, 300))]);
+  const th = tongHop_();
+  ghiBangDiem_(th);
+  return { ok: true, nhom: th, bangUrl: layBang_().getUrl(), trongSo: CAU_HINH.TRONG_SO, han: CAU_HINH.HAN_NOP_DU_AN };
+}
+
+/* ================== TÍNH ĐIỂM ================== */
+// muc: [m1..m4] (1–4); co: {saoChep, thieuNhatKy, nhatKyIt, duLieuCaNhan}
+function tinhDiem_(muc, co) {
+  co = co || {};
+  const m = muc.slice();
+  const ghiChu = [];
+  if (co.thieuNhatKy && m[0] > 2) { m[0] = 2; ghiChu.push('Thiếu nhật ký kiểm chứng AI: TC1 tối đa Mức 2.'); }
+  else if (co.nhatKyIt && m[0] > 3) { m[0] = 3; ghiChu.push('Nhật ký AI dưới 12 dòng: TC1 chưa đạt Mức 4.'); }
+  if (co.duLieuCaNhan && m[1] > 2) { m[1] = 2; ghiChu.push('Đưa thông tin cá nhân vào AI: TC2 tối đa Mức 2.'); }
+  if (co.saoChep) {
+    ghiChu.push('Sao chép không dẫn nguồn: TC1, TC2 Mức 1, không xét TC3, TC4.');
+    return { diem: lam2_(RUBRIC_W[0] * PCT[1] + RUBRIC_W[1] * PCT[1]), muc: [1, 1, 0, 0], ghiChu: ghiChu };
+  }
+  let d = 0;
+  for (let i = 0; i < 4; i++) d += RUBRIC_W[i] * PCT[m[i]];
+  return { diem: lam2_(d), muc: m, ghiChu: ghiChu };
+}
+
+function coTuDong_(soNK) {
+  return { thieuNhatKy: soNK === 0, nhatKyIt: soNK > 0 && soNK < 12 };
+}
+
+function soNgayTre_(t) {
+  const han = new Date(CAU_HINH.HAN_NOP_DU_AN);
+  const ms = t.getTime() - han.getTime();
+  return ms > 0 ? Math.ceil(ms / 86400000) : 0;
+}
+
+function heSoDongGop_(tb) {
+  if (tb === null) return 1;
+  if (tb >= 5) return 1;
+  if (tb >= 3) return 0.8;
+  return 0.6;
+}
+
+// Tổng hợp mọi dữ liệu dự án thành danh sách nhóm (dùng cho giáo viên và bảng điểm)
+function tongHop_() {
+  const bang = layBang_();
+  const doc = function (key) {
+    const sh = bang.getSheetByName(SH[key][0]);
+    const n = sh.getLastRow() - 1;
+    return n > 0 ? sh.getRange(2, 1, n, SH[key][1].length).getValues() : [];
+  };
+  const nhomMap = {};
+  const lay = function (nhom) {
+    const k = chuanHoa_(nhom);
+    if (!nhomMap[k]) nhomMap[k] = { nhom: String(nhom), soLan: 0, hoSo: null, luc: null, tre: 0, cheo: [], cheoCT: [], gv: null, dd: {}, ddCT: [] };
+    return nhomMap[k];
+  };
+  doc('HS').forEach(function (r) {
+    const g = lay(r[1]);
+    g.soLan++;
+    let hs = null;
+    try { hs = JSON.parse(r[17]); } catch (e) { hs = null; }
+    if (hs) { g.hoSo = hs; g.luc = toIso_(r[0]); g.tre = Number(r[15]) || 0; }
+  });
+  const loaiMap = {};   // trạng thái mới nhất của từng phiếu bị giáo viên loại
+  doc('LP').forEach(function (r) { loaiMap[r[1] + '|' + chuanHoa_(r[2]) + '|' + chuanHoa_(r[3])] = (r[4] === 'Loại'); });
+  const biLoai = function (loai, nhom, nguoi) { return !!loaiMap[loai + '|' + chuanHoa_(nhom) + '|' + chuanHoa_(nguoi)]; };
+  const cheoMoi = {};
+  doc('CC').forEach(function (r) { cheoMoi[chuanHoa_(r[1]) + '|' + chuanHoa_(r[3])] = r; });
+  Object.keys(cheoMoi).forEach(function (k) {
+    const r = cheoMoi[k];
+    const pc = { nguoi: String(r[1]), nhom: String(r[2]), muc: [r[4], r[5], r[6], r[7]].map(Number), gopY: String(r[9] || ''), luc: toIso_(r[0]),
+      loai: biLoai('CC', r[3], r[1]) };
+    const g = lay(r[3]);
+    g.cheoCT.push(pc);
+    if (!pc.loai) g.cheo.push(pc);
+  });
+  doc('GV').forEach(function (r) {
+    lay(r[1]).gv = { muc: [r[2], r[3], r[4], r[5]].map(Number), vp: { saoChep: !!r[6], thieuNhatKy: !!r[7], duLieuCaNhan: !!r[8] },
+      tre: Number(r[9]) || 0, nhanXet: String(r[11] || ''), luc: toIso_(r[0]) };
+  });
+  // Đồng đẳng: mỗi người chấm chỉ tính lượt nộp mới nhất
+  const ddRows = doc('DD');
+  const moiNhat = {};
+  ddRows.forEach(function (r) {
+    const k = chuanHoa_(r[2]) + '|' + chuanHoa_(r[1]);
+    const t = new Date(r[0]).getTime();
+    if (!moiNhat[k] || t > moiNhat[k]) moiNhat[k] = t;
+  });
+  ddRows.forEach(function (r) {
+    const k = chuanHoa_(r[2]) + '|' + chuanHoa_(r[1]);
+    if (new Date(r[0]).getTime() !== moiNhat[k]) return;
+    const g = lay(r[2]);
+    const ai = chuanHoa_(r[3]);
+    const loai = biLoai('DD', r[2], r[1]);
+    g.ddCT.push({ nguoi: String(r[1]), duoc: String(r[3]), d: [Number(r[4]), Number(r[5]), Number(r[6])], tong: Number(r[7]), loai: loai });
+    if (!loai) (g.dd[ai] = g.dd[ai] || []).push({ nguoi: chuanHoa_(r[1]), tong: Number(r[7]) });
+  });
+
+  const W = CAU_HINH.TRONG_SO;
+  return Object.keys(nhomMap).map(function (k) {
+    const g = nhomMap[k];
+    const hs = g.hoSo;
+    const vp = g.gv ? g.gv.vp : {};
+    const tuDong = hs ? coTuDong_(hs.soNhatKy) : {};
+    const tuCo = { saoChep: !!vp.saoChep, duLieuCaNhan: !!vp.duLieuCaNhan, thieuNhatKy: !!(vp.thieuNhatKy || tuDong.thieuNhatKy), nhatKyIt: !!tuDong.nhatKyIt };
+    const tu = hs ? tinhDiem_(hs.muc, tuCo).diem : null;
+    const cheoDiem = g.cheo.map(function (c) { return tinhDiem_(c.muc, vp).diem; });
+    const cheo = cheoDiem.length ? lam2_(cheoDiem.reduce(function (a, b) { return a + b; }, 0) / cheoDiem.length) : null;
+    const cheoMuc = [0, 1, 2, 3].map(function (i) {
+      return g.cheo.length ? lam2_(g.cheo.reduce(function (a, c) { return a + c.muc[i]; }, 0) / g.cheo.length) : null;
+    });
+    const gv = g.gv ? tinhDiem_(g.gv.muc, vp).diem : null;
+    let tong = 0, ts = 0;
+    if (gv !== null) { tong += W.gv * gv; ts += W.gv; }
+    if (cheo !== null) { tong += W.cheo * cheo; ts += W.cheo; }
+    if (tu !== null) { tong += W.tu * tu; ts += W.tu; }
+    const tongHop = ts ? lam2_(tong / ts) : null;
+    const tre = g.gv ? g.gv.tre : g.tre;
+    const truTre = Math.min(3, tre);
+    const diemNhom = tongHop === null ? null : lam1_(Math.max(0, tongHop - truTre));
+    const thanhVien = (hs ? hs.thanhVien : []).map(function (x) {
+      const ds = (g.dd[chuanHoa_(x.ten)] || []).filter(function (d) { return d.nguoi !== chuanHoa_(x.ten); });
+      const tb = ds.length ? lam2_(ds.reduce(function (a, d) { return a + d.tong; }, 0) / ds.length) : null;
+      const hsg = heSoDongGop_(tb);
+      return { ten: x.ten, stt: x.stt, vai: x.vai, dd: tb, soNguoiCham: ds.length, heSo: hsg,
+        diem: diemNhom === null ? null : lam1_(diemNhom * hsg) };
+    });
+    return { nhom: g.nhom, maDa: hs ? hs.maDa : '', tenDa: hs ? hs.tenDa : '', soLan: g.soLan, luc: g.luc, treTuDong: g.tre,
+      tu: tu, cheo: cheo, soCheo: g.cheo.length, cheoMuc: cheoMuc, gopY: g.cheo.map(function (c) { return c.gopY; }).filter(String),
+      gv: gv, gvChiTiet: g.gv, tongHop: tongHop, truTre: truTre, diemNhom: diemNhom, chinhThuc: gv !== null,
+      cheoCT: g.cheoCT, ddCT: g.ddCT,
+      thanhVien: thanhVien, hoSo: hs };
+  }).sort(function (a, b) { return (Number(a.nhom) || 999) - (Number(b.nhom) || 999); });
+}
+
+function ghiBangDiem_(ds) {
+  const sh = layBang_().getSheetByName(SH.BD[0]);
+  sh.clear();
+  const rows = [['BẢNG ĐIỂM DỰ ÁN – CHUYÊN ĐỀ 2 – LỚP ' + CAU_HINH.LOP, '', '', '', '', '', '', '', ''],
+    ['Trọng số: GV ' + CAU_HINH.TRONG_SO.gv * 100 + '% · chấm chéo ' + CAU_HINH.TRONG_SO.cheo * 100 + '% · tự chấm '
+      + CAU_HINH.TRONG_SO.tu * 100 + '% (thiếu thành phần nào thì chia lại theo các thành phần còn lại); trễ hạn trừ 1 điểm/ngày, tối đa 3.', '', '', '', '', '', '', '', ''],
+    ['Nhóm', 'Dự án', 'Tự chấm', 'Chấm chéo TB (số lượt)', 'Giáo viên', 'Điểm tổng hợp', 'Trừ trễ', 'Điểm nhóm', 'Trạng thái']];
+  ds.forEach(function (g) {
+    rows.push([g.nhom, g.maDa + (g.tenDa ? '. ' + g.tenDa : ''), g.tu === null ? '' : g.tu,
+      g.cheo === null ? '' : (dinhDang_(g.cheo) + ' (' + g.soCheo + ' lượt)'), g.gv === null ? '' : g.gv, g.tongHop === null ? '' : g.tongHop,
+      g.truTre || '', g.diemNhom === null ? '' : g.diemNhom, g.chinhThuc ? 'Đã chấm' : 'Chờ GV chấm']);
+  });
+  rows.push(['', '', '', '', '', '', '', '', '']);
+  rows.push(['Nhóm', 'Họ và tên', 'STT', 'Vai trò', 'Đồng đẳng TB (0–6)', 'Số bạn chấm', 'Hệ số đóng góp', 'Điểm cá nhân', 'Trạng thái']);
+  ds.forEach(function (g) {
+    g.thanhVien.forEach(function (x) {
+      rows.push([g.nhom, x.ten, x.stt, x.vai, x.dd === null ? '' : x.dd, x.soNguoiCham, x.heSo, x.diem === null ? '' : x.diem,
+        (g.chinhThuc ? 'Đã chấm' : 'Chờ GV chấm') + (x.dd === null ? ' · chưa có đồng đẳng (hệ số tạm 1,0)' : '')]);
+    });
+  });
+  sh.getRange(1, 1, rows.length, 9).setValues(rows);
+  sh.getRange(1, 1).setFontWeight('bold');
+  sh.getRange(3, 1, 1, 9).setFontWeight('bold');
+  sh.getRange(ds.length + 5, 1, 1, 9).setFontWeight('bold');
+}
+
+/* ================== HỌC SINH XEM ĐIỂM ================== */
+// Giáo viên chạy trong trình soạn thảo Apps Script (chọn tên hàm → Chạy):
+//   taoMaTraCuu()  – lập danh sách học sinh trên trang "Điểm học sinh", cấp mã tra cứu riêng, tạo tệp phiếu mã để in, cắt, phát tay.
+//   moXemDiem()    – cho phép học sinh xem điểm (không cần triển khai lại).
+//   dongXemDiem()  – khoá xem điểm.
+function moXemDiem() { PropertiesService.getScriptProperties().setProperty('MO_XEM_DIEM', '1'); Logger.log('Đã MỞ cho học sinh xem điểm.'); }
+function dongXemDiem() { PropertiesService.getScriptProperties().setProperty('MO_XEM_DIEM', '0'); Logger.log('Đã KHOÁ xem điểm.'); }
+
+function taoMaTraCuu() {
+  const bang = layBang_();
+  const sh = bang.getSheetByName(SH.XD[0]);
+  const n = sh.getLastRow() - 1;
+  const cu = n > 0 ? sh.getRange(2, 1, n, SH.XD[1].length).getValues() : [];
+  const daCo = {}, maDaDung = {};
+  cu.forEach(function (r) { daCo[chuanHoa_(r[1])] = true; if (r[3]) maDaDung[String(r[3]).toUpperCase()] = true; });
+  const moi = [];
+  const them = function (ten, stt, nhom) {
+    ten = sach_(ten, 80); if (!ten) return;
+    const k = chuanHoa_(ten); if (daCo[k]) return;
+    daCo[k] = true; moi.push([stt || '', ten, nhom || '', '', '', '', '']);
+  };
+  tongHop_().forEach(function (g) { g.thanhVien.forEach(function (x) { them(x.ten, x.stt, g.nhom); }); });
+  const nop = bang.getSheetByName(SH.NOP[0]);
+  const m = nop.getLastRow() - 1;
+  (m > 0 ? nop.getRange(2, 1, m, 4).getValues() : []).forEach(function (r) { them(r[1], r[2], r[3]); });
+  const tatCa = cu.concat(moi);
+  tatCa.forEach(function (r) { if (!r[3]) { let c; do { c = maNgauNhien_(); } while (maDaDung[c]); maDaDung[c] = true; r[3] = c; } });
+  tatCa.sort(function (a, b) { return (Number(a[0]) || 999) - (Number(b[0]) || 999); });
+  if (tatCa.length) sh.getRange(2, 1, tatCa.length, SH.XD[1].length).setValues(tatCa.map(function (r) { return r.map(function (v) { return o_(v); }); }));
+  const doc = DocumentApp.create('Phiếu mã tra cứu điểm CD2 – ' + CAU_HINH.LOP);
+  DriveApp.getFileById(doc.getId()).moveTo(layThuMuc_());
+  const body = doc.getBody();
+  body.appendParagraph('PHIẾU MÃ TRA CỨU ĐIỂM – CHUYÊN ĐỀ 2 – LỚP ' + CAU_HINH.LOP + ' (cắt theo từng ô, phát riêng từng em)').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  body.appendTable(tatCa.map(function (r) {
+    return ['Họ tên: ' + r[1] + '   ·   STT: ' + r[0] + '   ·   Nhóm: ' + r[2]
+      + '\nMã tra cứu: ' + r[3]
+      + '\nMở sites.google.com/view/kssh-12cs1 → mục “Điểm của em” → nhập STT và mã. Không đưa mã cho bạn khác.'];
+  }));
+  doc.saveAndClose();
+  Logger.log('Đã có ' + tatCa.length + ' học sinh (' + moi.length + ' em mới). Kiểm tra lại họ tên, STT trên trang "Điểm học sinh"; nhập điểm phiếu học tập, điểm kiểm tra, nhận xét.');
+  Logger.log('Tệp phiếu mã để in: ' + DriveApp.getFileById(doc.getId()).getUrl());
+}
+
+function maNgauNhien_() {
+  const kt = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let c = '';
+  for (let i = 0; i < 6; i++) c += kt.charAt(Math.floor(Math.random() * kt.length));
+  return c;
+}
+
+function xemDiem_(p) {
+  if (PropertiesService.getScriptProperties().getProperty('MO_XEM_DIEM') !== '1')
+    return { ok: false, loi: 'Thầy/cô chưa mở xem điểm. Em quay lại khi có thông báo.' };
+  const stt = sach_(p && p.stt, 5).replace(/^0+/, '');
+  const ma = sach_(p && p.ma, 12).toUpperCase().replace(/\s+/g, '');
+  if (!stt || !ma) return { ok: false, loi: 'Em nhập số thứ tự và mã tra cứu.' };
+  const cache = CacheService.getScriptCache();
+  const kSai = 'saiXD_' + stt;
+  const sai = Number(cache.get(kSai) || 0), saiChung = Number(cache.get('saiXD') || 0);
+  if (sai >= 5 || saiChung >= 60) return { ok: false, loi: 'Nhập sai quá nhiều lần, em thử lại sau 15 phút.' };
+  const sh = layBang_().getSheetByName(SH.XD[0]);
+  const n = sh.getLastRow() - 1;
+  const rows = n > 0 ? sh.getRange(2, 1, n, SH.XD[1].length).getValues() : [];
+  const r = rows.filter(function (x) {
+    return String(x[0]).trim().replace(/^0+/, '') === stt && String(x[3]).trim().toUpperCase() === ma;
+  })[0];
+  if (!r) { cache.put(kSai, String(sai + 1), 900); cache.put('saiXD', String(saiChung + 1), 600); return { ok: false, loi: 'Số thứ tự hoặc mã tra cứu chưa đúng.' }; }
+  const kq = { ok: true, hoTen: String(r[1]), stt: String(r[0]), nhom: String(r[2]),
+    pht: r[4] === '' ? null : r[4], kt: r[5] === '' ? null : r[5], nhanXet: String(r[6] || ''), duAn: null };
+  const ten = chuanHoa_(r[1]);
+  tongHop_().forEach(function (g) {
+    g.thanhVien.forEach(function (x) {
+      if (kq.duAn || chuanHoa_(x.ten) !== ten) return;
+      const d = { nhom: g.nhom, maDa: g.maDa, tenDa: g.tenDa, vai: x.vai, chinhThuc: g.chinhThuc };
+      if (g.chinhThuc) {
+        const c = g.gvChiTiet;
+        const kqGV = tinhDiem_(c.muc, c.vp);   // cùng cách tính với Bảng điểm dự án
+        d.muc = kqGV.muc; d.ghiChu = kqGV.ghiChu; d.gv = g.gv; d.tu = g.tu; d.cheo = g.cheo; d.soCheo = g.soCheo;
+        d.tongHop = g.tongHop; d.truTre = g.truTre; d.diemNhom = g.diemNhom; d.nhanXet = c.nhanXet; d.gopY = g.gopY;
+        d.heSo = x.heSo; d.diemCaNhan = x.diem;
+        if (CAU_HINH.HIEN_DONG_DANG) { d.dd = x.dd; d.soNguoiCham = x.soNguoiCham; }
+        d.trongSo = CAU_HINH.TRONG_SO;
+      }
+      kq.duAn = d;
+    });
+  });
+  return kq;
+}
+
+/* ================== TIỆN ÍCH ================== */
+function docMuc_(a) {
+  if (!Array.isArray(a) || a.length !== 4) return null;
+  const m = a.map(function (x) { return Math.round(Number(x)); });
+  return m.every(function (x) { return x >= 1 && x <= 4; }) ? m : null;
+}
+
+function dungMaNop_(ma) {
+  return !CAU_HINH.MA_NOP || sach_(ma, 40).toUpperCase() === CAU_HINH.MA_NOP.toUpperCase();
+}
+
+function gonJson_(o) {
+  let s = JSON.stringify(o);
+  if (s.length > 45000) {
+    o = JSON.parse(s);
+    Object.keys(o.tom).forEach(function (k) { o.tom[k] = o.tom[k].slice(0, 1200); });
+    o.minhChung = o.minhChung.map(function (x) { return x.slice(0, 600); });
+    o.phanTu = o.phanTu.slice(0, 800);
+    s = JSON.stringify(o);
+  }
+  return s;
+}
+
+function layThuMuc_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('FOLDER_ID');
+  if (id) { try { return DriveApp.getFolderById(id); } catch (e) { } }
+  const f = DriveApp.createFolder(CAU_HINH.TEN_THU_MUC);
+  props.setProperty('FOLDER_ID', f.getId());
+  return f;
+}
+
+function layThuMucCon_(cha, ten) {
+  const it = cha.getFoldersByName(ten);
+  return it.hasNext() ? it.next() : cha.createFolder(ten);
+}
+
+function layBang_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('SS_ID');
+  let ss = null;
+  if (id) { try { ss = SpreadsheetApp.openById(id); } catch (e) { ss = null; } }
+  if (!ss) {
+    ss = SpreadsheetApp.create(CAU_HINH.TEN_BANG);
+    DriveApp.getFileById(ss.getId()).moveTo(layThuMuc_());
+    ss.getSheets()[0].setName(SH.NOP[0]);
+    props.setProperty('SS_ID', ss.getId());
+  }
+  Object.keys(SH).forEach(function (k) {
+    const ten = SH[k][0], cot = SH[k][1];
+    let sh = ss.getSheetByName(ten);
+    if (!sh) sh = ss.insertSheet(ten);
+    if (cot.length && sh.getLastRow() === 0) {
+      sh.getRange(1, 1, 1, cot.length).setValues([cot]).setFontWeight('bold');
+      sh.setFrozenRows(1);
+      sh.getRange('A:A').setNumberFormat('dd/MM/yyyy HH:mm');
+    }
+  });
+  return ss;
+}
+
+function sach_(v, max) {
+  if (v === null || v === undefined) return '';
+  return String(v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim().slice(0, max);
+}
+
+function o_(v) { return /^[=+\-@]/.test(v) ? "'" + v : v; }   // chặn công thức khi ghi vào bảng tính
+function du4_(r) { const a = r.slice(0, 4); while (a.length < 4) a.push(''); return a; }
+function lam2_(x) { return Math.round(x * 100) / 100; }
+function lam1_(x) { return Math.round(x * 10) / 10; }
+function dinhDang_(x) { return String(x).replace('.', ','); }
+function toIso_(d) { try { return new Date(d).toISOString(); } catch (e) { return ''; } }
+function chuanHoa_(s) { return khongDau_(String(s)).toLowerCase().replace(/\s+/g, ' ').trim(); }
+function khongDau_(s) {
+  return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
+}
+function json_(o) {
+  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
